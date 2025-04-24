@@ -1,7 +1,7 @@
 # C言語によるCGIプログラミングの設計入門  
 〜最初からC言語で造っとけ〜
 
-![表紙画像](../images/cover.png)
+![表紙画像](images/cover.png)
 
 このリポジトリは、C言語でCGI（Common Gateway Interface）を使ってWebアプリケーションを構築するための教材です。  
 Webの仕組みを理解したい人のために、フォーム入力、DB接続、HTML出力といった基本的な処理を  
