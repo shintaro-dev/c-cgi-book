@@ -238,3 +238,139 @@ MariaDB特有のプロトコルに従って接続したり、SQLを送ったり�
 この構成によって、  
 私たちは**データベース製品の違いに振り回されず**に、  
 **共通の手順でデータ操作ができる**わけです。
+
+## 7.3 C言語からODBC接続してみよう
+
+これまで、ODBC接続の流れをざっくりと押さえてきました。  
+ここからは、いよいよ**実際にコードを書いて接続してみる**ステップに進みます！
+
+まずは**「接続して切断するだけ」**という、最小限のプログラムを作成してみましょう。
+
+---
+
+### 7.3.1 最小限の接続プログラム
+
+以下は、  
+**ODBCを使ってデータベースに接続し、すぐに切断するだけ**のシンプルなC言語プログラムです。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sql.h>
+#include <sqlext.h>
+
+int main(void)
+{
+    SQLHENV hEnv = NULL;      // 環境ハンドル
+    SQLHDBC hDbc = NULL;      // 接続ハンドル
+    SQLRETURN ret;            // 戻り値
+    SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=password;";
+
+    // 環境ハンドルを確保
+    ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &hEnv);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "環境ハンドルの確保に失敗しました。\n");
+        return EXIT_FAILURE;
+    }
+
+    // 環境ハンドルの属性設定（ODBC 3.0に設定）
+    ret = SQLSetEnvAttr(hEnv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "環境属性の設定に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // 接続ハンドルを確保
+    ret = SQLAllocHandle(SQL_HANDLE_DBC, hEnv, &hDbc);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "接続ハンドルの確保に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // データベースに接続
+    ret = SQLDriverConnect(
+        hDbc, NULL,
+        connStr, SQL_NTS,
+        NULL, 0, NULL,
+        SQL_DRIVER_NOPROMPT
+    );
+
+    if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
+        printf("データベースへの接続に成功しました！\n");
+    } else {
+        fprintf(stderr, "データベースへの接続に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // 接続を切断
+    SQLDisconnect(hDbc);
+
+    // ハンドルを解放
+    SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+
+    return EXIT_SUCCESS;
+}
+```
+
+---
+
+### 7.3.2 コード解説
+
+ポイントだけ簡単に押さえます。
+
+| 手順 | 使った関数 | 説明 |
+|:----|:----------|:-----|
+| 環境ハンドル確保 | `SQLAllocHandle` | 最初に「ODBC使います！」と宣言 |
+| 環境設定 | `SQLSetEnvAttr` | ODBC 3.0準拠に設定 |
+| 接続ハンドル確保 | `SQLAllocHandle` | DB接続用のハンドルを確保 |
+| データベース接続 | `SQLDriverConnect` | 実際に接続文字列でDBにアクセス |
+| 成功／失敗の確認 | 戻り値チェック | 成功なら「成功！」メッセージ、失敗ならエラー |
+| 切断・解放 | `SQLDisconnect`、`SQLFreeHandle` | リソースをきれいに片付ける |
+
+---
+
+### 7.3.3 実行例・動作確認
+
+コンパイル：
+
+```bash
+gcc -o dbconnect dbconnect.c -lodbc
+```
+
+実行：
+
+```bash
+./dbconnect
+```
+
+結果：
+
+成功時
+
+```
+データベースへの接続に成功しました！
+```
+
+失敗時
+
+```
+データベースへの接続に失敗しました。
+```
+
+---
+
+### まとめ
+
+- まずは**「繋がる」ことが最優先**
+- この骨格ができれば、次に
+  - SQL文の発行
+  - データの取得
+  に進める
+- ODBCは関数の数は多いけれど、**パターン化してしまえば怖くない！**
+
+---
