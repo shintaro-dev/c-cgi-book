@@ -758,3 +758,78 @@ if (ret == SQL_ERROR) {
 - 必要に応じて`SQLGetDiagRec`で詳細エラーを取得できる
 
 ---
+
+### 7.4.4 リソース管理のまとめ
+
+ODBCプログラムでは、**失敗しても必ずリソース（ハンドル）を解放すること**が重要です。
+
+たとえば、エラーが発生した場合にも、
+- ステートメントハンドル（`hStmt`）
+- 接続ハンドル（`hDbc`）
+- 環境ハンドル（`hEnv`）
+は**必ず`SQLFreeHandle`や`SQLDisconnect`で解放**しましょう。
+
+### エラーパターンでも安全に解放するコツ
+
+典型的には、処理の中でエラー発生時にすぐジャンプできるよう、
+`goto`を使ったエラーハンドリングが便利です。
+
+サンプル：
+
+```c
+SQLRETURN ret;
+SQLHENV hEnv = NULL;
+SQLHDBC hDbc = NULL;
+SQLHSTMT hStmt = NULL;
+
+// 環境ハンドル確保
+ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &hEnv);
+if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+    fprintf(stderr, "環境ハンドル確保失敗\n");
+    goto cleanup;
+}
+
+// （この後も同様にエラーチェックしていく）
+
+cleanup:
+    if (hStmt) SQLFreeHandle(SQL_HANDLE_STMT, hStmt);
+    if (hDbc) {
+        SQLDisconnect(hDbc);
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+    }
+    if (hEnv) SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+
+return (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) ? EXIT_SUCCESS : EXIT_FAILURE;
+```
+
+このようにすることで、
+- どこでエラーが発生しても漏れなくリソースを解放できる
+- プログラムがスッキリする
+メリットがあります！
+
+---
+
+### 7.4.5 次章へのブリッジ
+
+ここまでで、
+- データベースに接続する
+- SQL文を実行してデータを追加する
+- データを取得する
+- エラー処理を行う
+- リソースを適切に解放する
+という基本的な技術を一通り体験できました！
+
+次の章では、
+**「ユーザー認証とセッション管理」**
+というテーマに進みます！
+
+- 「誰がログインしているか」を管理する
+- 「ログイン中のユーザーだけが特定機能を使える」ようにする
+- 「ログアウト」できる仕組みを作る
+
+こういった**本格的なWebアプリケーションに不可欠な技術**を、
+C言語＋CGIの組み合わせで実装していきます！
+
+それでは、次章へ進みましょう！🚀
+
+---
