@@ -374,3 +374,387 @@ gcc -o dbconnect dbconnect.c -lodbc
 - ODBCは関数の数は多いけれど、**パターン化してしまえば怖くない！**
 
 ---
+## 7.4 SQLの実行と結果の取得
+
+ODBCでデータベースに接続できるようになったら、  
+次はいよいよ**SQL文を実行してデータを操作する**ステップに進みます！
+
+まずは簡単な**INSERT文**を実行して、  
+「データベースにレコードを書き込む」動きを体験してみましょう。
+
+---
+
+### 7.4.1 SQL文を実行してみる（INSERT）
+
+以下は、  
+**フォームから受け取ったデータを仮定して、データベースにINSERTする**  
+サンプルプログラムです。
+
+（今回は簡単化のため、直接プログラム内にデータを埋め込んでいます）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sql.h>
+#include <sqlext.h>
+
+int main(void)
+{
+    SQLHENV hEnv = NULL;
+    SQLHDBC hDbc = NULL;
+    SQLHSTMT hStmt = NULL;
+    SQLRETURN ret;
+    SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=password;";
+    SQLCHAR insertSql[] = "INSERT INTO sample_table (name, age) VALUES ('Taro', 25)";
+
+    // 環境ハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &hEnv) != SQL_SUCCESS) {
+        fprintf(stderr, "環境ハンドルの確保に失敗しました。\n");
+        return EXIT_FAILURE;
+    }
+
+    SQLSetEnvAttr(hEnv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+
+    // 接続ハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_DBC, hEnv, &hDbc) != SQL_SUCCESS) {
+        fprintf(stderr, "接続ハンドルの確保に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // データベース接続
+    ret = SQLDriverConnect(hDbc, NULL, connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "データベース接続に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // ステートメントハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hDbc, &hStmt) != SQL_SUCCESS) {
+        fprintf(stderr, "ステートメントハンドルの確保に失敗しました。\n");
+        SQLDisconnect(hDbc);
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // SQL文実行
+    ret = SQLExecDirect(hStmt, insertSql, SQL_NTS);
+    if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
+        printf("データのINSERTに成功しました！\n");
+    } else {
+        fprintf(stderr, "データのINSERTに失敗しました。\n");
+    }
+
+    // ステートメントハンドル解放
+    SQLFreeHandle(SQL_HANDLE_STMT, hStmt);
+
+    // 接続切断
+    SQLDisconnect(hDbc);
+
+    // ハンドル解放
+    SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+
+    return EXIT_SUCCESS;
+}
+```
+
+#### このコードのポイント
+
+| 手順 | 関数 | 説明 |
+|:----|:-----|:-----|
+| ステートメントハンドル確保 | `SQLAllocHandle(SQL_HANDLE_STMT)` | SQL文を実行するためのハンドルを確保 |
+| SQL文を発行 | `SQLExecDirect(hStmt, insertSql, SQL_NTS)` | INSERT文をデータベースに送る |
+| 実行結果の確認 | 戻り値を見て成功/失敗判定 |
+| ステートメントハンドル解放 | `SQLFreeHandle(SQL_HANDLE_STMT)` | 使い終わったら必ず解放 |
+
+---
+
+### 実行例
+
+コンパイル：
+
+```bash
+gcc -o insert_test insert_test.c -lodbc
+```
+
+実行：
+
+```bash
+./insert_test
+```
+
+結果：
+
+成功時
+
+```
+データのINSERTに成功しました！
+```
+
+失敗時
+
+```
+データのINSERTに失敗しました。
+```
+
+※あらかじめ、`sample_table`テーブルを作成しておく必要があります！
+
+```sql
+CREATE TABLE sample_table (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    age INT
+);
+```
+
+---
+
+### まとめ
+
+- SQL文は `SQLExecDirect` で簡単に実行できる
+- ステートメントハンドル（`hStmt`）が新たに登場する
+- 実行後はハンドルを必ず解放すること
+- 次は、SELECT文を使ってデータを読み取る方法にチャレンジ！
+
+---
+### 7.4.2 データを取得する（SELECT）
+
+データベースにINSERTできたら、  
+次は**データを取り出す（SELECT）**を体験してみましょう！
+
+今回は、簡単なSELECT文を使って、  
+テーブルに登録されているデータを**1行ずつ取得して表示**してみます。
+
+#### サンプルプログラム（SELECT版）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sql.h>
+#include <sqlext.h>
+
+int main(void)
+{
+    SQLHENV hEnv = NULL;
+    SQLHDBC hDbc = NULL;
+    SQLHSTMT hStmt = NULL;
+    SQLRETURN ret;
+    SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=password;";
+    SQLCHAR selectSql[] = "SELECT id, name, age FROM sample_table";
+    SQLINTEGER id;
+    SQLCHAR name[100];
+    SQLINTEGER age;
+    SQLLEN indId, indName, indAge;
+
+    // 環境ハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &hEnv) != SQL_SUCCESS) {
+        fprintf(stderr, "環境ハンドルの確保に失敗しました。\n");
+        return EXIT_FAILURE;
+    }
+
+    SQLSetEnvAttr(hEnv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+
+    // 接続ハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_DBC, hEnv, &hDbc) != SQL_SUCCESS) {
+        fprintf(stderr, "接続ハンドルの確保に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // データベース接続
+    ret = SQLDriverConnect(hDbc, NULL, connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "データベース接続に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // ステートメントハンドル確保
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hDbc, &hStmt) != SQL_SUCCESS) {
+        fprintf(stderr, "ステートメントハンドルの確保に失敗しました。\n");
+        SQLDisconnect(hDbc);
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // SQL文実行（SELECT）
+    ret = SQLExecDirect(hStmt, selectSql, SQL_NTS);
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        fprintf(stderr, "SELECT文の実行に失敗しました。\n");
+        SQLFreeHandle(SQL_HANDLE_STMT, hStmt);
+        SQLDisconnect(hDbc);
+        SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+        return EXIT_FAILURE;
+    }
+
+    // データ取得・表示
+    printf("id\tname\tage\n");
+    printf("--------------------------\n");
+
+    while ((ret = SQLFetch(hStmt)) != SQL_NO_DATA) {
+        SQLGetData(hStmt, 1, SQL_C_SLONG, &id, 0, &indId);
+        SQLGetData(hStmt, 2, SQL_C_CHAR, name, sizeof(name), &indName);
+        SQLGetData(hStmt, 3, SQL_C_SLONG, &age, 0, &indAge);
+
+        printf("%d\t%s\t%d\n", id, name, age);
+    }
+
+    // ステートメントハンドル解放
+    SQLFreeHandle(SQL_HANDLE_STMT, hStmt);
+
+    // 接続切断
+    SQLDisconnect(hDbc);
+
+    // ハンドル解放
+    SQLFreeHandle(SQL_HANDLE_DBC, hDbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, hEnv);
+
+    return EXIT_SUCCESS;
+}
+```
+
+#### このコードのポイント
+
+| 手順 | 関数 | 説明 |
+|:----|:-----|:-----|
+| SQL文発行 | `SQLExecDirect` | SELECT文を実行 |
+| 1行ずつ結果取得 | `SQLFetch` | 1レコードずつ取得する |
+| 列データ取得 | `SQLGetData` | 指定した列の値を取得する |
+| 結果の出力 | `printf` | 取得したデータを表示 |
+
+---
+
+#### 実行例
+
+コンパイル：
+
+```bash
+gcc -o select_test select_test.c -lodbc
+```
+
+実行：
+
+```bash
+./select_test
+```
+
+出力結果（例）：
+
+```
+id      name    age
+--------------------------
+1       Taro    25
+2       Hanako  30
+```
+
+※ あらかじめ、`sample_table`にデータが入っている必要があります。
+
+---
+
+#### まとめ
+
+- SELECT文も `SQLExecDirect` で実行できる
+- 結果を受け取るには `SQLFetch` ＋ `SQLGetData` を組み合わせる
+- データ型ごとに適切な型で受け取る（`SQL_C_SLONG`, `SQL_C_CHAR`など）
+
+---
+### 7.4.3 エラー処理の基本
+
+ここまでで、  
+**SQLを実行してデータを追加したり取得したりする方法**を体験しました。
+
+しかし、実際の開発現場では、  
+**「失敗するかもしれない」**ことを前提に作らないといけません。
+
+たとえば：
+
+- データベース接続に失敗したら？
+- SQL文に誤りがあったら？
+- 取得対象のデータが存在しなかったら？
+
+そんなときに、**適切にエラーメッセージを出したり、安全にリソースを解放したりする**のが、  
+**エラー処理**の基本になります。
+
+---
+
+#### 最小限のエラー処理パターン
+
+ODBCでは、  
+**ほとんどすべての関数が「戻り値」で成功・失敗を返してきます**。
+
+戻り値は、次のように解釈します：
+
+| 戻り値 | 意味 |
+|:---|:---|
+| `SQL_SUCCESS` | 正常終了 |
+| `SQL_SUCCESS_WITH_INFO` | 正常終了だけど追加情報あり（警告） |
+| `SQL_NO_DATA` | データなし（特にSELECT時に使う） |
+| `SQL_ERROR` | エラー発生 |
+| `SQL_INVALID_HANDLE` | ハンドルが無効 |
+
+---
+
+#### 基本的なチェック方法
+
+実際のコードでは、たとえばこんな風に書きます。
+
+```c
+SQLRETURN ret;
+
+ret = SQLExecDirect(hStmt, sql, SQL_NTS);
+if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+    fprintf(stderr, "SQL文の実行に失敗しました。\n");
+    // 必要ならここでリソース解放やエラー復帰処理を入れる
+}
+```
+
+- **成功 (`SQL_SUCCESS` or `SQL_SUCCESS_WITH_INFO`) なら続行**
+- **それ以外 (`SQL_ERROR`など) ならエラー処理に入る**
+
+このパターンを覚えておくだけで、  
+ODBCプログラムの安全性がグッと高まります。
+
+---
+
+#### エラー情報を詳しく取得するには？
+
+さらに踏み込んで、  
+**エラーの内容（原因）を取得する**こともできます。
+
+ODBCでは、`SQLGetDiagRec` という関数を使って、  
+エラーコードやメッセージを取得できます。
+
+簡単な例：
+
+```c
+SQLCHAR sqlState[6];
+SQLINTEGER nativeError;
+SQLCHAR messageText[256];
+SQLSMALLINT textLength;
+
+if (ret == SQL_ERROR) {
+    SQLGetDiagRec(SQL_HANDLE_STMT, hStmt, 1, sqlState, &nativeError, messageText, sizeof(messageText), &textLength);
+    fprintf(stderr, "ODBCエラー: %s (%s)\n", messageText, sqlState);
+}
+```
+
+これで、  
+**「何が起きたのか？」**をログに記録できるようになります。
+
+---
+
+#### まとめ
+
+- ODBC関数の**戻り値を必ずチェックする**
+- `SQL_SUCCESS`か`SQL_SUCCESS_WITH_INFO`ならOK
+- エラーが出たら最低限のメッセージを出す
+- 必要に応じて`SQLGetDiagRec`で詳細エラーを取得できる
+
+---
