@@ -221,3 +221,108 @@ int main(void)
 
 次は、
 **「受信データをデータベースに保存する処理」を作成する**パートに進みます！
+
+### 9.4 データベースに保存する
+
+ここでは、フォームから受信したデータを、ODBCを使ってデータベースに保存する処理を実装します。
+
+#### 9.4.1 必要な準備
+
+- ODBCドライバと接続設定が済んでいること（Appendix参照）
+- データベースに `diary` テーブルが作成済みであること
+
+---
+
+#### 9.4.2 サンプルコード（C言語＋ODBC）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sql.h>
+#include <sqlext.h>
+
+// 入力を安全に処理するための関数（簡易エスケープ）
+void escape(char *dest, const char *src, size_t max) {
+    size_t i = 0, j = 0;
+    while (src[i] && j < max - 1) {
+        if (src[i] == '\'' || src[i] == '"' || src[i] == '\\') {
+            if (j < max - 2) dest[j++] = '\\';
+        }
+        dest[j++] = src[i++];
+    }
+    dest[j] = '\0';
+}
+
+int main(void)
+{
+    SQLHENV env;
+    SQLHDBC dbc;
+    SQLHSTMT stmt;
+    SQLRETURN ret;
+    char *title_raw = getenv("title");
+    char *body_raw = getenv("body");
+    char *pub_raw = getenv("is_public");
+
+    char title[1024], body[4096];
+    escape(title, title_raw ? title_raw : "", sizeof(title));
+    escape(body, body_raw ? body_raw : "", sizeof(body));
+    int is_public = (pub_raw && strcmp(pub_raw, "0") == 0) ? 0 : 1;
+
+    // HTTPレスポンスヘッダ
+    printf("Content-Type: text/html\r\n\r\n");
+
+    // ODBC初期化
+    ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &env);
+    SQLSetEnvAttr(env, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+    SQLAllocHandle(SQL_HANDLE_DBC, env, &dbc);
+
+    // DSNなし接続（例：MariaDB）
+    SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=password;";
+    ret = SQLDriverConnect(dbc, NULL, connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
+
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        printf("<p>データベース接続に失敗しました。</p>");
+        return 1;
+    }
+
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+
+    char query[8192];
+    snprintf(query, sizeof(query),
+        "INSERT INTO diary (user_id, title, body, is_public) VALUES (0, '%s', '%s', %d)",
+        title, body, is_public);
+
+    ret = SQLExecDirect(stmt, (SQLCHAR *)query, SQL_NTS);
+
+    if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
+        printf("<p>投稿が保存されました！</p>");
+    } else {
+        printf("<p>保存中にエラーが発生しました。</p>");
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+    SQLDisconnect(dbc);
+    SQLFreeHandle(SQL_HANDLE_DBC, dbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, env);
+
+    return 0;
+}
+```
+
+---
+
+#### 9.4.3 解説ポイント
+
+| 項目 | 説明 |
+|:---|:---|
+| エスケープ処理 | SQLインジェクション対策の簡易対応（本格版はプリペアドステートメント推奨） |
+| `getenv()` | 環境変数からCGIパラメータ取得（Apacheの設定により形式は異なる） |
+| SQL組み立て | 文字列連結によるSQL生成（デバッグしやすい） |
+
+> ※ 本番環境では、SQLインジェクション対策として `SQLBindParameter` 等を用いたプリペアドステートメントを推奨します。
+
+---
+
+次は、  
+**「投稿された日記を一覧表示する」**パートに進みましょう！
