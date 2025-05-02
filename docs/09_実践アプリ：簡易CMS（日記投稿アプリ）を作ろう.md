@@ -2,6 +2,10 @@
 
 ### 9.1 アプリの概要と要件整理
 
+> ※ 本章では日記アプリの投稿・保存・表示の仕組みを明確に理解することを優先し、HTMLテンプレート処理は使用していません。
+> 各ページのHTMLは直接出力していますが、6章で紹介したテンプレート処理を用いることで、保守性・再利用性を高めることができます。
+> Appendixにてテンプレート対応版の例も紹介予定です。
+
 ここからは、実践的なアプリケーション開発に挑戦します！
 
 今回作るのは、**「簡易CMS（日記投稿アプリ）」**です。
@@ -326,3 +330,96 @@ int main(void)
 
 次は、  
 **「投稿された日記を一覧表示する」**パートに進みましょう！
+
+### 9.5 日記を一覧表示する
+
+ここでは、データベースに保存された日記を一覧表示する機能を作成します。
+
+#### 9.5.1 一覧表示の要件
+
+- 投稿された日記の一覧をHTML形式で表示する
+- 公開設定（is_public）に応じて表示制御を行う
+- 表示順は新しい投稿が上に来るようにする（ORDER BY created_at DESC）
+
+---
+
+#### 9.5.2 サンプルコード（C言語＋ODBC）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sql.h>
+#include <sqlext.h>
+
+int main(void)
+{
+    SQLHENV env;
+    SQLHDBC dbc;
+    SQLHSTMT stmt;
+    SQLRETURN ret;
+    SQLCHAR title[256], body[2048];
+
+    // HTTPヘッダ
+    printf("Content-Type: text/html\r\n\r\n");
+    printf("<html><head><meta charset='UTF-8'><title>日記一覧</title></head><body>");
+    printf("<h1>公開日記一覧</h1>");
+
+    // ODBC接続準備
+    SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &env);
+    SQLSetEnvAttr(env, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+    SQLAllocHandle(SQL_HANDLE_DBC, env, &dbc);
+
+    SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=password;";
+    ret = SQLDriverConnect(dbc, NULL, connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
+
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        printf("<p>データベース接続に失敗しました。</p></body></html>");
+        return 1;
+    }
+
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+
+    const char *sql = "SELECT title, body FROM diary WHERE is_public = 1 ORDER BY created_at DESC";
+    SQLExecDirect(stmt, (SQLCHAR *)sql, SQL_NTS);
+
+    while ((ret = SQLFetch(stmt)) != SQL_NO_DATA) {
+        SQLGetData(stmt, 1, SQL_C_CHAR, title, sizeof(title), NULL);
+        SQLGetData(stmt, 2, SQL_C_CHAR, body, sizeof(body), NULL);
+
+        printf("<div style='border:1px solid #ccc; padding:10px; margin:10px;'>");
+        printf("<h2>%s</h2>\n", title);
+        printf("<p>%s</p>\n", body);
+        printf("</div>\n");
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+    SQLDisconnect(dbc);
+    SQLFreeHandle(SQL_HANDLE_DBC, dbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, env);
+
+    printf("</body></html>");
+    return 0;
+}
+```
+
+---
+
+#### 9.5.3 解説ポイント
+
+| 項目 | 説明 |
+|:---|:---|
+| `ORDER BY created_at DESC` | 新しい投稿が上に来るように並び替え |
+| `WHERE is_public = 1` | 公開されている投稿のみを取得 |
+| `SQLGetData` | 1件ずつタイトル・本文を取り出して表示 |
+
+> ※ 本サンプルでは「投稿者ごとの制御」や「非公開投稿の表示制限」は実装していません。
+> 後続のログイン機能と組み合わせて発展させていきます。
+
+---
+
+これで、
+**投稿 → 保存 → 一覧表示** の基本的な一連の流れが完成しました！
+
+次は、
+**「ログインユーザーごとの投稿表示」**など、ユーザー管理の話題に進んでいきます。
