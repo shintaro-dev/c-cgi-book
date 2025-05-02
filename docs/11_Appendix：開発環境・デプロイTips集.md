@@ -431,3 +431,129 @@ isql -v testdsn webuser webpass
 - `isql` で動作確認し、接続に成功すれば準備完了
 
 この設定が完了すれば、次章でCGIからODBC経由でDBアクセスが可能になります。
+
+## A.6 CGIからのDB接続実装（ODBC経由）
+
+この節では、実際に C言語で書かれたCGIプログラムから MariaDB に ODBC経由で接続し、クエリを実行してHTMLを返すまでの最小構成を解説します。
+
+---
+
+### A.6.1 必要なヘッダファイルとライブラリ
+
+ODBCを使うには、以下のヘッダとライブラリが必要です。
+
+```c
+#include <sql.h>
+#include <sqlext.h>
+```
+
+ビルド時には `-lodbc` オプションでリンクします：
+
+```bash
+gcc dbtest.c -o dbtest.cgi -lodbc
+```
+
+---
+
+### A.6.2 接続＆クエリ実行の最小サンプル
+
+以下は、`testapp` データベースに接続し、`SELECT 1` を実行するだけの最小サンプルです。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sql.h>
+#include <sqlext.h>
+
+int main(void) {
+    SQLHENV henv;
+    SQLHDBC hdbc;
+    SQLHSTMT hstmt;
+    SQLRETURN ret;
+    SQLINTEGER result;
+
+    printf("Content-Type: text/html\n\n");
+    printf("<html><body><h1>ODBC接続テスト</h1>\n");
+
+    // 環境ハンドル
+    if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv) != SQL_SUCCESS) {
+        printf("<p>環境ハンドル作成失敗</p></body></html>");
+        return 1;
+    }
+    SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
+
+    // 接続ハンドル
+    SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
+
+    // DSNなし接続文字列
+    char *connStr = "Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;";
+    ret = SQLDriverConnect(hdbc, NULL, (SQLCHAR*)connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
+
+    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        printf("<p>接続失敗</p></body></html>");
+        SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
+        SQLFreeHandle(SQL_HANDLE_ENV, henv);
+        return 1;
+    }
+
+    // ステートメントハンドル
+    SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
+    ret = SQLExecDirect(hstmt, (SQLCHAR*)"SELECT 1", SQL_NTS);
+
+    if (ret == SQL_SUCCESS) {
+        SQLBindCol(hstmt, 1, SQL_C_SLONG, &result, 0, NULL);
+        if (SQLFetch(hstmt) == SQL_SUCCESS) {
+            printf("<p>SELECT結果: %d</p>\n", result);
+        }
+    } else {
+        printf("<p>クエリ実行失敗</p>\n");
+    }
+
+    // 解放
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    SQLDisconnect(hdbc);
+    SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, henv);
+
+    printf("</body></html>\n");
+    return 0;
+}
+```
+
+---
+
+### A.6.3 ビルドと配置手順
+
+```bash
+gcc dbtest.c -o dbtest.cgi -lodbc
+sudo mv dbtest.cgi /usr/lib/cgi-bin/
+sudo chmod 755 /usr/lib/cgi-bin/dbtest.cgi
+```
+
+その後、ブラウザで以下にアクセスします：
+
+```
+http://localhost/cgi-bin/dbtest.cgi
+```
+
+---
+
+### A.6.4 トラブル対応
+
+| 症状 | 対応 |
+|------|------|
+| 500 Internal Server Error | CGIに実行権限がない、または出力フォーマット（Content-Type）ミス |
+| CGI出力が止まる | `connStr` の Driver 名・パスをチェック（MariaDBが登録済みか） |
+| クエリが失敗する | ユーザ名・パスワード・DB名のタイプミス |
+| Apacheログにエラーが出る | `sudo tail -f /var/log/apache2/error.log` で確認 |
+
+---
+
+### 小まとめ
+
+- C言語CGIからODBC経由でMariaDBに接続
+- DSNなし接続文字列で再現性・移植性を重視
+- 最小の `SELECT 1` で構成し、HTMLを返す
+- トラブル時はApacheログと実行権限を重点的に確認
+
+次章 A.7 では、これを実運用に持っていくためのTipsや注意点を解説します。
