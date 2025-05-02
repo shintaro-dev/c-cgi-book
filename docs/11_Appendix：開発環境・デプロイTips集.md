@@ -309,3 +309,125 @@ mariadb -u webuser -p testapp
 - CLIでの接続確認まで行う
 
 次章 A.5 では、この設定をもとに ODBC からの接続確認を行います。
+
+## A.5 ODBCドライバの設定
+
+この節では、CGIプログラムからMariaDBに接続するためのODBCドライバ設定について解説します。本書では **DSNなし接続方式** を基本とし、開発・運用の再現性と移植性を重視した構成を採用しています。
+
+---
+
+### A.5.1 unixODBCとMariaDB Connector/ODBCのインストール
+
+まずはODBCの基本モジュール（unixODBC）とMariaDB用のドライバ（Connector/ODBC）をインストールします。
+
+```bash
+sudo apt update
+sudo apt install -y unixodbc unixodbc-dev odbcinst libodbc1 libmariadb-dev libmariadb3
+```
+
+MariaDB Connector/ODBCの実体ファイルは通常以下の場所にインストールされます：
+
+```
+/usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+```
+
+---
+
+### A.5.2 ドライバ定義ファイル（odbcinst.ini）の登録
+
+`odbcinst.ini` にドライバエントリを登録します。次のようにファイルに記述するか、コマンドで一括登録できます。
+
+#### 手動記述（`/etc/odbcinst.ini`）の例：
+
+```ini
+[MariaDB]
+Description = MariaDB ODBC driver
+Driver = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+```
+
+#### コマンドによる登録：
+
+```bash
+sudo odbcinst -i -d -f /etc/odbcinst.ini
+```
+
+このコマンドにより `odbcinst -q -d` でドライバ名が列挙されるようになります。
+
+---
+
+### A.5.3 DSNなし接続の推奨（本書の基本方針）
+
+ODBCには「DSN（Data Source Name）」という名前付き接続設定がありますが、本書では以下の理由により **DSNなし接続** を推奨しています。
+
+- 設定ファイルが不要で、**プログラムに設定が自己完結する**
+- ユーザ依存・OS依存の差異が減り、**再現性・可搬性が高い**
+- VPS・クラウド環境での自動デプロイがしやすい
+
+#### DSNなし接続の例（接続文字列）：
+
+```c
+"Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;"
+```
+
+この文字列を `SQLDriverConnect` に直接渡す形で使用します。
+
+---
+
+### A.5.4 DSNあり接続の参考（odbc.ini）
+
+参考として、DSNを使う場合の設定ファイル例を示します。  
+`/etc/odbc.ini` または `~/.odbc.ini` に以下のように記述します：
+
+```ini
+[testdsn]
+Driver = MariaDB
+Server = localhost
+Database = testapp
+User = webuser
+Password = webpass
+```
+
+登録確認：
+
+```bash
+odbcinst -q -s
+```
+
+---
+
+### A.5.5 接続確認：`isql` コマンドによるテスト
+
+ODBCの接続確認には `isql` コマンドが便利です。以下のように実行します。
+
+#### DSNなしで接続確認：
+
+```bash
+isql -v "Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;"
+```
+
+#### DSNありで接続確認：
+
+```bash
+isql -v testdsn webuser webpass
+```
+
+---
+
+### よくあるエラーと対処
+
+| エラー例 | 原因と対処 |
+|----------|------------|
+| `[08001] Could not connect` | Server名・ポートの指定ミス／ユーザ認証ミス |
+| `isql: symbol lookup error` | 32bit/64bit混在のライブラリ競合。`libmaodbc.so`の場所を確認 |
+| `Segmentation fault` | `Driver=` 記述ミス or 不正なINIファイル構文 |
+
+---
+
+### 小まとめ
+
+- unixODBCとMariaDB Connector/ODBCをインストール
+- `odbcinst.ini` にMariaDBドライバを定義
+- DSNなし接続を推奨（構成ファイル不要で再現性が高い）
+- `isql` で動作確認し、接続に成功すれば準備完了
+
+この設定が完了すれば、次章でCGIからODBC経由でDBアクセスが可能になります。
