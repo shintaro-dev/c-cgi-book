@@ -214,3 +214,98 @@ sudo tail -f /var/log/apache2/error.log
 - CGI実行用ディレクトリを作成・許可
 - Apache設定ファイルで `ExecCGI` を許可
 - 確認用 `.cgi` をビルド＆ブラウザで動作確認
+
+
+## A.4 MariaDBのセットアップ
+
+この節では、CGIプログラムからのデータベース接続に必要な MariaDB の基本的なセットアップ手順を解説します。対象環境は Ubuntu 24.04 LTS を前提とし、ローカル環境および本番デプロイの両方で再現可能な最小構成を目指します。
+
+### A.4.1 パッケージのインストール
+
+MariaDBはDebian/Ubuntu系で公式にサポートされており、以下のコマンドでインストールできます。
+
+```bash
+sudo apt update
+sudo apt install -y mariadb-server mariadb-client
+```
+
+インストール後は MariaDB サービスを起動・有効化しておきます。
+
+```bash
+sudo systemctl enable mariadb
+sudo systemctl start mariadb
+```
+
+### A.4.2 セキュリティ設定（mysql_secure_installation）
+
+初期インストール後は、`mysql_secure_installation` による初期設定を行います。
+
+```bash
+sudo mysql_secure_installation
+```
+
+#### 主な確認・設定ポイント：
+
+- root パスワードの設定（または現在のUnix socket認証を維持）
+- 匿名ユーザの削除
+- テストデータベースの削除
+- リモートrootログインの禁止
+
+> ※ 読者が詰まりやすいポイント：
+> ODBC経由で接続する場合、Unix socket 認証ではログインできないため、
+> 明示的に `mysql_native_password` を使うよう root を再設定する必要があります。
+
+例：
+
+```sql
+-- mysql (または mariadb) シェルにて
+ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('yourpassword');
+FLUSH PRIVILEGES;
+```
+
+※ `sudo mariadb` でrootユーザとしてログインできます。
+
+---
+
+### A.4.3 アプリケーション用データベースとユーザの作成
+
+本書で使用するテストアプリ用に、次のような初期SQLスクリプトを実行します：
+
+```sql
+-- アプリケーション用データベースとユーザ作成
+CREATE DATABASE testapp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER 'webuser'@'localhost' IDENTIFIED BY 'webpass';
+
+GRANT ALL PRIVILEGES ON testapp.* TO 'webuser'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+SQL実行方法（MariaDBシェル内で手打ち or SQLファイルからバッチ実行）：
+
+```bash
+sudo mariadb < setup.sql
+```
+
+---
+
+### A.4.4 動作確認（CLI）
+
+設定が正しくできているか、次のようにログインして確認します。
+
+```bash
+mariadb -u webuser -p testapp
+```
+
+ログイン成功後、簡単なテーブルを作って `SELECT` できればOKです。
+
+---
+
+### 小まとめ
+
+- `mariadb-server`, `mariadb-client` をインストール
+- `mysql_secure_installation` 実行後、必要に応じて `mysql_native_password` に切り替え
+- アプリ用DBとユーザーを作成（`webuser` / `testapp`）
+- CLIでの接続確認まで行う
+
+次章 A.5 では、この設定をもとに ODBC からの接続確認を行います。
