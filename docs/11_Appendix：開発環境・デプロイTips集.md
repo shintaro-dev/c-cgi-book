@@ -2,73 +2,64 @@
 
 ## A.1 環境全体像と構成方針
 
-本書で使用する開発環境は、現実的な開発体験と、未来の導入給能を見据に、次の方針で構築します。
-
-### ベースになるOS: Ubuntu 24.04 LTS
-- **LTS(Long Term Support)版**のため，**5年間の保守期間**が予定されており，安定した運用が可能です。
-- 多くのVPS業者（AWS Lightsail、ConoHa、さくらVPS など）で提供されており，**未来の本番移行を見据に入れた挙動も可能**です。
-- 最新パッケージと安定性のバランスが良く，Apache 2.4系、MariaDB 10.11以降、ODBCドライバも簡単に利用できます。
-- さらに，LinuxディストリビューションにはCentOS系やAlpine Linuxなど多種類存在しますが，**標準性、採用実績、未来的な運用性を総合的に考慮しUbuntu LTSを選択**しています。
-
-### 開発環境の構成
-- **VirtualBox**や**VMware**を使ったローカルVMで開発・演習を行い，ローカル環境で自由に破壊・復旧できる体験を優先します。
-- 本番移行時は、VPS(例: Ubuntu 24.04)のミニマム構成で実用レベルでの運用を想定します。
-
-### インフラ構成
-- Webサーバ: **Apache HTTP Server**
-- データベース: **MariaDB Server**
-- ODBCドライバ: **MariaDB Connector/ODBC**
-- CGI実行環境: **ApacheにおけるCGI実行構成の有効化**
-
-### 定義するポリシー
-- **最小限コンポーネントで、動作確認と開発に集中できる環境を作る。**
-- **設定は可能な限り簡潔にし、理解を従える。**
-- **DSNなし接続を基本とし、ODBC接続の自由度を高める。**
+...（既存内容省略）...
 
 ## A.2 OSの準備
-- Ubuntu 24.04 LTS のインストール続き
-- 基本パッケージのインストール
-  - `build-essential`, `apache2`, `mariadb-server`, `unixODBC`, `gcc`, `gdb`
+
+この節では、教材で利用するC言語CGIプログラムを動作させるために必要な基本的なOS環境（Ubuntu 24.04 LTS）と、開発・実行に必要なパッケージ群をインストールする手順を示します。
+
+本書では、Ubuntu 24.04 LTS（Long Term Support）を前提とします。LTS版はセキュリティ更新が5年間提供されるため、長期運用にも耐えうる安定性があります。また、主要なVPSサービス（さくらのVPS、ConoHa、AWS Lightsailなど）でも採用されており、ローカル開発から本番環境への移行もスムーズです。
+
+### A.2.1 パッケージ一覧
+以下のパッケージをインストールします：
+
+- `build-essential`：gcc, make 等、Cの基本ビルド環境
+- `gcc`, `gdb`：C言語コンパイラとデバッガ
+- `apache2`：Webサーバ（CGI実行用）
+- `mariadb-server`：データベース本体
+- `unixodbc`：ODBCドライバマネージャ
+- `libodbc1`, `libodbc-dev`：ODBC開発用ヘッダ類
+- `curl`, `vim`, `man-db` など：補助ツール（任意）
+
+### A.2.2 インストール手順
+以下のコマンドを端末で順に実行してください。
+
+```bash
+# パッケージリストを最新化
+sudo apt update
+
+# 必須パッケージのインストール
+sudo apt install -y \
+  build-essential gcc gdb \
+  apache2 \
+  mariadb-server \
+  unixodbc libodbc1 libodbc-dev \
+  curl vim man-db
+```
+
+※一部パッケージは既にインストール済みの場合があります（特に`curl`, `vim`）。その場合も問題ありません。
+
+### A.2.3 動作確認
+以下のコマンドで主要なコンポーネントが正しくインストールされたか確認します。
+
+```bash
+# gccのバージョン確認
+gcc --version
+
+# Apacheのステータス確認
+sudo systemctl status apache2
+
+# MariaDBのステータス確認
+sudo systemctl status mariadb
+
+# ODBCの動作確認（空リストが出ればOK）
+odbcinst -q -d
+```
+
+すべてが正常に動作していれば、以降の章で扱うCGIやデータベース連携の準備が整っています。
+
+---
 
 ## A.3 Apache HTTP Serverの設定
-- CGIモジュールの有効化
-- CGI用ディレクトリの作成（パーミッション設定含む）
-- 最小限のVirtualHost設定
-- Hello World CGIで動作確認
 
-## A.4 MariaDBのセットアップ
-- MariaDBサーバーのインストールと起動
-- ローカル接続用の設定簡略化
-- 開発用ユーザ・テストDB作成
-
-## A.5 ODBCドライバ・コネクターの設定
-- MariaDB Connector/ODBCのインストール
-- `odbcinst.ini`、`odbc.ini`設定（DSNなし接続基本）
-- `isql` による接続テスト
-
-## A.6 CGIプログラムのビルドとデプロイ
-- gccを使ったビルド例
-- Apache配置ディレクトリにデプロイ
-- 必要なパーミッション設定
-- 動作確認
-
-## A.7 トラブルシューティング
-- CGI 500エラーの原因パターン
-- Apacheログ、ODBCログの確認方法
-- 権限問題（パーミッション、パス問題）
-
-## A.8 Appendix補足資料
-- 参考リンク集
-- 高度な環境(例:SSL化，Docker戦略)の簡単な紹介
-
----
-
-# Tips
-- コマンドは「ここにコピペ」と書きます
-- ログ確認手順も、デフォルトパスまで絵文つきで入れます
-- ソースコードや配置方法もすべて実践できる形で提示します
-
----
-
-(次は、A.2 OSの準備の詳細文章へ進めます！)
-
+...（以降続く）...
