@@ -638,3 +638,90 @@ sudo tail -f /var/log/apache2/error.log
 - ログ出力とトラブルシュート体制を事前に整備
 
 以上を踏まえることで、本番環境でも安定してCGIアプリを運用できるようになります。
+
+## A.8 補足情報集（UserDir構成・DSNあり接続・その他）
+
+この節では、教材本編では省略した構成のバリエーションや、現場でよくあるトラブル・TIPSなどを補足的に紹介します。環境に応じた応用や再現、トラブル対応の際の参考にしてください。
+
+---
+
+### A.8.1 UserDir構成（ユーザー単位のCGI配置）
+
+Apacheには `mod_userdir` を有効化することで、各ユーザーのホームディレクトリ以下でWebサイトを公開できます。
+
+#### 例：`/home/username/public_html/cgi-bin/`
+
+```bash
+sudo a2enmod userdir
+sudo systemctl restart apache2
+```
+
+`/etc/apache2/mods-enabled/userdir.conf` にて以下のように設定：
+
+```apache
+<Directory /home/*/public_html/cgi-bin>
+    Options +ExecCGI
+    AddHandler cgi-script .cgi
+    Require all granted
+</Directory>
+```
+
+ブラウザアクセス例：
+
+```
+http://localhost/~username/cgi-bin/hello.cgi
+```
+
+---
+
+### A.8.2 DSNあり接続を使いたい場合
+
+Appendix A.5でDSNなし接続を推奨しましたが、以下のような理由でDSNありを選ぶケースもあります。
+
+- 接続先を頻繁に切り替える必要がある
+- 複数のツールで一貫した設定を使いたい
+
+その場合は `/etc/odbc.ini` や `~/.odbc.ini` に設定し、`SQLConnect()` でDSN名を渡して使用します。
+
+#### DSN名を使う接続例：
+
+```c
+SQLConnect(hdbc, (SQLCHAR*)"mydsn", SQL_NTS, (SQLCHAR*)"user", SQL_NTS, (SQLCHAR*)"pass", SQL_NTS);
+```
+
+---
+
+### A.8.3 実行権限・shebang・改行コードの罠
+
+Windows上で開発したCGIスクリプトをLinuxへ転送する際、以下に注意：
+
+- 改行コード（CRLF）があると `500 Internal Server Error` の原因になる
+- shebang（`#!/usr/bin/env`）が `bash` や `sh` ではなく `csh` などになると予期せぬ挙動に
+
+#### 対応策：
+
+```bash
+# 改行コードを修正（dos2unixインストール済みの場合）
+dos2unix hello.cgi
+```
+
+---
+
+### A.8.4 本書の構成をローカルで再現したい場合のヒント
+
+- Apacheの設定ファイルや `.cgi` ファイルはGit等で管理することで、再現性が高まります
+- `isql` や `odbcinst -q -d` などのコマンドをスクリプト化しておくと初期構築がスムーズ
+- 教材で使ったディレクトリ構成やサンプルCGIを `/opt/c-cgi-book/` 等にまとめておくと複数環境で流用可能
+
+---
+
+### 小まとめ
+
+この章では以下の補足情報を扱いました：
+
+- UserDirを使った構成の有効化と利用法
+- DSNあり接続の用途と設定例
+- 改行・shebang・パーミッションの罠と対処
+- 再現性のあるローカル構成維持の工夫
+
+本書の範囲外でも、これらのTipsが応用・発展の一助になることを願っています。
