@@ -557,3 +557,84 @@ http://localhost/cgi-bin/dbtest.cgi
 - トラブル時はApacheログと実行権限を重点的に確認
 
 次章 A.7 では、これを実運用に持っていくためのTipsや注意点を解説します。
+
+## A.7 デプロイ時の注意点とTips
+
+この節では、ローカルで動作確認を終えたCGIアプリケーションを本番サーバへデプロイする際の注意点や推奨設定について整理します。開発時には動作していたのに、サーバ上では動かない・挙動が異なるといったトラブルを未然に防ぐための基本事項を押さえます。
+
+---
+
+### A.7.1 所有権と実行権限の設定
+
+CGIプログラムは、Apacheの実行ユーザ（通常 `www-data`）が読み取り・実行できる必要があります。
+
+```bash
+sudo chown root:www-data /usr/lib/cgi-bin/myapp.cgi
+sudo chmod 755 /usr/lib/cgi-bin/myapp.cgi
+```
+
+- `chmod 755`：全ユーザが実行可能なように設定
+- `chown root:www-data`：Apacheのグループに属するよう設定
+
+---
+
+### A.7.2 Apache設定の確認（特に複数VirtualHost時）
+
+複数サイトやVPS環境では、`/usr/lib/cgi-bin` を利用する構成であっても、VirtualHost単位での `ScriptAlias` や `<Directory>` 設定が必要なことがあります。
+
+```apache
+<VirtualHost *:80>
+    ...
+    ScriptAlias /cgi-bin/ /usr/lib/cgi-bin/
+
+    <Directory "/usr/lib/cgi-bin">
+        Options +ExecCGI
+        SetHandler cgi-script
+        Require all granted
+    </Directory>
+</VirtualHost>
+```
+
+---
+
+### A.7.3 ファイアウォールやポート制限
+
+本番環境では外部公開にあたってファイアウォールの設定が必要になる場合があります。
+
+```bash
+# UFWの例（ポート80/443開放）
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+また、クラウド環境ではセキュリティグループやNAT設定も併せて確認しましょう。
+
+---
+
+### A.7.4 SELinuxやAppArmorの制約
+
+CentOSや一部Ubuntuサーバでは、SELinux/AppArmorによってCGIの動作が制限されることがあります。アクセス拒否ログが `/var/log/audit/` や `dmesg` に出ていないか確認し、必要に応じてポリシーを緩和するか、無効化する必要があります。
+
+---
+
+### A.7.5 バックアップとログ確認体制
+
+- `.cgi` や `.conf` ファイルの変更時にはバージョン管理（Gitなど）を活用
+- Apacheのログ確認：
+
+```bash
+sudo tail -f /var/log/apache2/error.log
+```
+
+- MariaDB側のログも `/var/log/mysql/error.log` に記録されている場合があります。
+
+---
+
+### 小まとめ
+
+- 所有権と実行権限は `www-data` 実行を前提に整える
+- Apache設定はVirtualHost単位でも確認
+- 本番環境ではファイアウォール／セキュリティ機構に注意
+- ログ出力とトラブルシュート体制を事前に整備
+
+以上を踏まえることで、本番環境でも安定してCGIアプリを運用できるようになります。
