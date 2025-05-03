@@ -1,662 +1,134 @@
-# 11_Appendix：開発環境・デプロイTips集 (Draft)
+## A.0 開発環境の準備（MariaDB / unixODBC）
 
-## A.1 環境全体像と構成方針
+本書の各章で使用する C 言語 CGI プログラムを動作させるには、以下のソフトウェアが必要です。
 
-このAppendixでは、本書の学習を支える開発環境・実行環境の構築手順を整理し、読者が自身の手元でサンプルコードを動作させられることを目指します。
+- Apache（mod_cgi 有効）
+- MariaDB（または MySQL）
+- unixODBC（ODBC経由でDB接続するため）
+- GCC、make、標準Cライブラリ
 
-教材で扱う構成はできる限りシンプルに留めつつも、現実的なWebアプリケーション開発の流れに沿った形になっており、最終的にはVPS等の本番環境にデプロイ可能な構成も視野に入れています。
+### A.0.1 必要パッケージのインストール（Debian/Ubuntu系）
 
----
-
-### 想定環境（基本構成）
-
-- OS：Ubuntu 24.04 LTS（Long Term Support）
-- Webサーバ：Apache HTTP Server（CGI対応）
-- データベース：MariaDB
-- CGI実行：C言語でビルドした実行ファイル
-- DB接続方式：ODBC（MariaDB Connector/ODBC＋unixODBC）
-
----
-
-### 構成ポリシー
-
-- **学習コストを抑えつつも、実運用に繋がる構成**  
-  複雑なフレームワークは導入せず、Webサーバ・データベース・CGIプログラムがそれぞれどう連携して動いているかを、できるだけ「素の状態」で体験できる構成を採用しています。
-
-- **Ubuntu LTSを採用する理由**  
-  Ubuntu 24.04は長期サポート（LTS）対象であり、セキュリティ更新が5年間提供されます。VPSサービスでも広く採用されており、開発からデプロイまでの接続がスムーズです。  
-  他にもCentOS系やAlpine Linux等のディストリビューションは存在しますが、汎用性・採用実績・学習コストの観点からUbuntuを採用しています。
-
-- **DSNなしのODBC接続を基本とする理由**  
-  DSN（Data Source Name）を登録する方式は便利ですが、システム依存・ユーザー依存の設定になりやすく、再現性や移植性に課題が残ります。本書では接続文字列をソースコードに記述する「DSNなし接続方式（Driver=〜; Server=〜;）」を基本とします。
-
-- **VMやVPSの両方で再現可能な構成**  
-  本書ではローカル開発環境として VirtualBox 等でUbuntuを動かす構成を基本としつつ、最終的には VPS（さくらのVPS、ConoHa、Lightsail等）にそのまま移行可能な構成となっています。
-
----
-
-この方針に基づいて、以下の章では OS／Apache／MariaDB／ODBC／CGIビルド環境などの準備手順を段階的に解説します。
-
-## A.2 OSの準備
-
-この節では、教材で利用するC言語CGIプログラムを動作させるために必要な基本的なOS環境（Ubuntu 24.04 LTS）と、開発・実行に必要なパッケージ群をインストールする手順を示します。
-
-本書では、Ubuntu 24.04 LTS（Long Term Support）を前提とします。LTS版はセキュリティ更新が5年間提供されるため、長期運用にも耐えうる安定性があります。また、主要なVPSサービス（さくらのVPS、ConoHa、AWS Lightsailなど）でも採用されており、ローカル開発から本番環境への移行もスムーズです。
-
-### A.2.1 パッケージ一覧
-以下のパッケージをインストールします：
-
-- `build-essential`：gcc, make 等、Cの基本ビルド環境
-- `gcc`, `gdb`：C言語コンパイラとデバッガ
-- `apache2`：Webサーバ（CGI実行用）
-- `mariadb-server`：データベース本体
-- `unixodbc`：ODBCドライバマネージャ
-- `libodbc1`, `libodbc-dev`：ODBC開発用ヘッダ類
-- `curl`, `vim`, `man-db` など：補助ツール（任意）
-
-### A.2.2 インストール手順
-以下のコマンドを端末で順に実行してください。
-
-```bash
-# パッケージリストを最新化
+```sh
 sudo apt update
-
-# 必須パッケージのインストール
-sudo apt install -y \
-  build-essential gcc gdb \
-  apache2 \
-  mariadb-server \
-  unixodbc libodbc1 libodbc-dev \
-  curl vim man-db
+sudo apt install apache2 gcc g++ make mariadb-server unixodbc unixodbc-dev libmariadb-dev
 ```
 
-※一部パッケージは既にインストール済みの場合があります（特に`curl`, `vim`）。その場合も問題ありません。
+### A.0.2 MariaDBの初期構築
 
-### A.2.3 動作確認
-以下のコマンドで主要なコンポーネントが正しくインストールされたか確認します。
-
-```bash
-# gccのバージョン確認
-gcc --version
-
-# Apacheのステータス確認
-sudo systemctl status apache2
-
-# MariaDBのステータス確認
-sudo systemctl status mariadb
-
-# ODBCの動作確認（空リストが出ればOK）
-odbcinst -q -d
+```sh
+sudo mysql_secure_installation
 ```
 
-すべてが正常に動作していれば、以降の章で扱うCGIやデータベース連携の準備が整っています。
+- rootパスワードの設定
+- 匿名ユーザーの削除
+- testデータベースの削除
+- リモートrootログインの無効化
+
+#### A.0.2.1 ユーザーとデータベースの作成
+
+```sql
+-- MariaDBにログイン
+sudo mariadb -u root -p
+
+-- ユーザーとデータベース作成
+CREATE DATABASE sample;
+CREATE USER 'user'@'localhost' IDENTIFIED BY 'pass';
+GRANT ALL PRIVILEGES ON sample.* TO 'user'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+### A.0.3 unixODBCの導入と確認
+
+#### A.0.3.1 導入確認
+
+```sh
+odbcinst -j
+```
+
+- 設定ファイルのパスが `/etc/odbc.ini`, `/etc/odbcinst.ini` であることを確認
+
+#### A.0.3.2 接続確認
+
+```sh
+isql -v mydb user pass
+```
+
+- `odbc.ini` に設定したDSNが正しく認識されていれば接続成功
+
+> ※ `mydb` は DSN 名、`user`, `pass` は第7章で設定したユーザー情報を使ってください。
+
+# 11_Appendix：開発環境・デプロイTips集（）
+
+## A.0 構成とポリシー：この教材が目指す環境とは
+
+このAppendixでは、本書のサンプルCGIプログラムが動作する環境を、Ubuntuベースで一から構築する方法を解説します。開発用のローカル環境としてだけでなく、将来的なVPS・本番運用への橋渡しを見据えた設計になっており、再現性・透明性・学習効果の高さを重視しています。
 
 ---
 
+### ■ 使用OSとその理由
 
-## A.3 Apache HTTP Serverの設定
+本書では、Ubuntu 24.04 LTS（Long Term Support）を前提としています。LTS版は5年間のセキュリティアップデートが提供され、以下のような理由で選定されています：
 
-この節では、C言語CGIプログラムを動作させるために、Apache HTTP Server の基本設定を行います。
+- 安定性と長期保守の両立が可能
+- パッケージが豊富で、開発ツールの導入が容易
+- 主要なVPSサービス（さくらのVPS、ConoHa、AWS Lightsail など）でも標準的に提供されている
 
-### A.3.1 ApacheのCGI有効化
+これにより、ローカルで構築した環境をそのまま本番へ持ち込むことができ、実用的な運用スキルも自然と身につきます。
 
-デフォルトのApacheはCGIを無効化しているため、`cgi` モジュールを明示的に有効化する必要があります。
+---
+
+### ■ 本書の構成方針
+
+教材としての明快さと運用面での再現性を両立するため、以下の方針を採用しています：
+
+- **CGIプログラムはC言語で実装**し、動作原理が追いやすい構造とする
+- **ODBC接続はDSN定義なし**（接続文字列の直接埋め込み）を基本とし、構成ファイルの依存を最小限に抑える
+- **Apacheの基本機能のみを利用**し、特殊なフレームワークやミドルウェアに依存しない
+- **MariaDB + unixODBC + Apache + GCC** による軽量構成とし、Ubuntuの標準リポジトリで導入可能な範囲に収める
+
+これにより、構成の理解と再現性が確保され、トラブル時にも自力で対処できる知識が自然と身につきます。
+
+---
+
+### ■ 必要なパッケージ群（Ubuntu）
+
+以下のパッケージを最初に導入しておくと、本書の内容すべてに対応できます：
+
+```bash
+sudo apt update
+sudo apt install apache2 gcc g++ make mariadb-server unixodbc unixodbc-dev libmariadb-dev
+```
+
+---
+
+次節（A.1）からは、Apacheの基本設定やCGI実行設定、MariaDBとの接続、API用のMIME調整など、各機能別に順を追って構築していきます。
+
+---
+
+## A.1 Apacheの基本設定
+
+ApacheにてCGIを有効にするため、以下のような設定を行います。
 
 ```bash
 sudo a2enmod cgi
 sudo systemctl restart apache2
 ```
 
----
-
-
-### A.3.2 CGIファイルの配置と実行ディレクトリ
-
-UbuntuのApacheでは、標準で `/usr/lib/cgi-bin/` がCGI実行ディレクトリとして設定されています。  
-このディレクトリは、Apacheの初期設定で `ExecCGI` が許可されており、特別な設定変更をしなくても `.cgi` ファイルが実行可能です。
-
-以下のようにして、CGIプログラムをビルド・配置・実行権限付与します。
-
-```bash
-# Cソースをビルド
-gcc hello.c -o hello.cgi
-
-# 標準のCGIディレクトリに配置
-sudo mv hello.cgi /usr/lib/cgi-bin/
-sudo chmod 755 /usr/lib/cgi-bin/hello.cgi
-```
-
-ブラウザで以下にアクセスすると、CGIの実行結果が確認できます：
-
-```
-http://localhost/cgi-bin/hello.cgi
-```
+デフォルトでは `/usr/lib/cgi-bin/` に `.cgi` ファイルを置くことで実行可能になります。
 
 ---
 
+## A.2 UserDir構成の有効化（任意）
 
-### A.3.3 Apache設定ファイルの確認
-
-UbuntuにおけるApacheのデフォルト設定では、`/usr/lib/cgi-bin/` に対してすでにCGIの実行が許可されています。
-
-確認のため、以下のディレクトリ設定が `/etc/apache2/sites-available/000-default.conf` または `/etc/apache2/conf-enabled/serve-cgi-bin.conf` に含まれていることをチェックしてください。
-
-```apacheconf
-<Directory "/usr/lib/cgi-bin">
-    Options +ExecCGI
-    SetHandler cgi-script
-    Require all granted
-</Directory>
-```
-
-この設定がすでに有効であれば、追加の設定変更は不要です。
-
-設定変更を行った場合は、Apacheを再起動して反映してください。
-
-```bash
-sudo systemctl restart apache2
-```
-
-
----
-
-
-### A.3.4 動作確認用サンプルCGI
-
-`hello.cgi` を以下のように作成します。
-
-```c
-#include <stdio.h>
-
-int main(void) {
-    printf("Content-Type: text/html\n\n");
-    printf("<html><body><h1>Hello, CGI!</h1></body></html>\n");
-    return 0;
-}
-```
-
-ビルド＆配置：
-
-```bash
-gcc hello.c -o hello.cgi
-sudo mv hello.cgi /usr/lib/cgi-bin/
-sudo chmod 755 /usr/lib/cgi-bin/hello.cgi
-```
-
-ブラウザでアクセス：
-
-```
-http://localhost/cgi-bin/hello.cgi
-```
-
-
----
-
-### A.3.5 よくあるエラー
-
-| 症状 | 対処 |
-|------|------|
-| 403 Forbidden | パーミッション不足、実行権限なし |
-| 500 Internal Server Error | CGI内エラー、`Content-Type` 出力忘れ |
-| 404 Not Found | パス設定ミス、ファイル配置場所の間違い |
-
-ログ確認は以下で：
-
-```bash
-sudo tail -f /var/log/apache2/error.log
-```
-
----
-
-### 小まとめ
-
-- `a2enmod cgi` でCGIモジュールを有効化
-- CGI実行用ディレクトリを作成・許可
-- Apache設定ファイルで `ExecCGI` を許可
-- 確認用 `.cgi` をビルド＆ブラウザで動作確認
-
-
-## A.4 MariaDBのセットアップ
-
-この節では、CGIプログラムからのデータベース接続に必要な MariaDB の基本的なセットアップ手順を解説します。対象環境は Ubuntu 24.04 LTS を前提とし、ローカル環境および本番デプロイの両方で再現可能な最小構成を目指します。
-
-### A.4.1 パッケージのインストール
-
-MariaDBはDebian/Ubuntu系で公式にサポートされており、以下のコマンドでインストールできます。
-
-```bash
-sudo apt update
-sudo apt install -y mariadb-server mariadb-client
-```
-
-インストール後は MariaDB サービスを起動・有効化しておきます。
-
-```bash
-sudo systemctl enable mariadb
-sudo systemctl start mariadb
-```
-
-### A.4.2 セキュリティ設定（mysql_secure_installation）
-
-初期インストール後は、`mysql_secure_installation` による初期設定を行います。
-
-```bash
-sudo mysql_secure_installation
-```
-
-#### 主な確認・設定ポイント：
-
-- root パスワードの設定（または現在のUnix socket認証を維持）
-- 匿名ユーザの削除
-- テストデータベースの削除
-- リモートrootログインの禁止
-
-> ※ 読者が詰まりやすいポイント：
-> ODBC経由で接続する場合、Unix socket 認証ではログインできないため、
-> 明示的に `mysql_native_password` を使うよう root を再設定する必要があります。
-
-例：
-
-```sql
--- mysql (または mariadb) シェルにて
-ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('yourpassword');
-FLUSH PRIVILEGES;
-```
-
-※ `sudo mariadb` でrootユーザとしてログインできます。
-
----
-
-### A.4.3 アプリケーション用データベースとユーザの作成
-
-本書で使用するテストアプリ用に、次のような初期SQLスクリプトを実行します：
-
-```sql
--- アプリケーション用データベースとユーザ作成
-CREATE DATABASE testapp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE USER 'webuser'@'localhost' IDENTIFIED BY 'webpass';
-
-GRANT ALL PRIVILEGES ON testapp.* TO 'webuser'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-SQL実行方法（MariaDBシェル内で手打ち or SQLファイルからバッチ実行）：
-
-```bash
-sudo mariadb < setup.sql
-```
-
----
-
-### A.4.4 動作確認（CLI）
-
-設定が正しくできているか、次のようにログインして確認します。
-
-```bash
-mariadb -u webuser -p testapp
-```
-
-ログイン成功後、簡単なテーブルを作って `SELECT` できればOKです。
-
----
-
-### 小まとめ
-
-- `mariadb-server`, `mariadb-client` をインストール
-- `mysql_secure_installation` 実行後、必要に応じて `mysql_native_password` に切り替え
-- アプリ用DBとユーザーを作成（`webuser` / `testapp`）
-- CLIでの接続確認まで行う
-
-次章 A.5 では、この設定をもとに ODBC からの接続確認を行います。
-
-## A.5 ODBCドライバの設定
-
-この節では、CGIプログラムからMariaDBに接続するためのODBCドライバ設定について解説します。本書では **DSNなし接続方式** を基本とし、開発・運用の再現性と移植性を重視した構成を採用しています。
-
----
-
-### A.5.1 unixODBCとMariaDB Connector/ODBCのインストール
-
-まずはODBCの基本モジュール（unixODBC）とMariaDB用のドライバ（Connector/ODBC）をインストールします。
-
-```bash
-sudo apt update
-sudo apt install -y unixodbc unixodbc-dev odbcinst libodbc1 libmariadb-dev libmariadb3
-```
-
-MariaDB Connector/ODBCの実体ファイルは通常以下の場所にインストールされます：
-
-```
-/usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
-```
-
----
-
-### A.5.2 ドライバ定義ファイル（odbcinst.ini）の登録
-
-`odbcinst.ini` にドライバエントリを登録します。次のようにファイルに記述するか、コマンドで一括登録できます。
-
-#### 手動記述（`/etc/odbcinst.ini`）の例：
-
-```ini
-[MariaDB]
-Description = MariaDB ODBC driver
-Driver = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
-```
-
-#### コマンドによる登録：
-
-```bash
-sudo odbcinst -i -d -f /etc/odbcinst.ini
-```
-
-このコマンドにより `odbcinst -q -d` でドライバ名が列挙されるようになります。
-
----
-
-### A.5.3 DSNなし接続の推奨（本書の基本方針）
-
-ODBCには「DSN（Data Source Name）」という名前付き接続設定がありますが、本書では以下の理由により **DSNなし接続** を推奨しています。
-
-- 設定ファイルが不要で、**プログラムに設定が自己完結する**
-- ユーザ依存・OS依存の差異が減り、**再現性・可搬性が高い**
-- VPS・クラウド環境での自動デプロイがしやすい
-
-#### DSNなし接続の例（接続文字列）：
-
-```c
-"Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;"
-```
-
-この文字列を `SQLDriverConnect` に直接渡す形で使用します。
-
----
-
-### A.5.4 DSNあり接続の参考（odbc.ini）
-
-参考として、DSNを使う場合の設定ファイル例を示します。  
-`/etc/odbc.ini` または `~/.odbc.ini` に以下のように記述します：
-
-```ini
-[testdsn]
-Driver = MariaDB
-Server = localhost
-Database = testapp
-User = webuser
-Password = webpass
-```
-
-登録確認：
-
-```bash
-odbcinst -q -s
-```
-
----
-
-### A.5.5 接続確認：`isql` コマンドによるテスト
-
-ODBCの接続確認には `isql` コマンドが便利です。以下のように実行します。
-
-#### DSNなしで接続確認：
-
-```bash
-isql -v "Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;"
-```
-
-#### DSNありで接続確認：
-
-```bash
-isql -v testdsn webuser webpass
-```
-
----
-
-### よくあるエラーと対処
-
-| エラー例 | 原因と対処 |
-|----------|------------|
-| `[08001] Could not connect` | Server名・ポートの指定ミス／ユーザ認証ミス |
-| `isql: symbol lookup error` | 32bit/64bit混在のライブラリ競合。`libmaodbc.so`の場所を確認 |
-| `Segmentation fault` | `Driver=` 記述ミス or 不正なINIファイル構文 |
-
----
-
-### 小まとめ
-
-- unixODBCとMariaDB Connector/ODBCをインストール
-- `odbcinst.ini` にMariaDBドライバを定義
-- DSNなし接続を推奨（構成ファイル不要で再現性が高い）
-- `isql` で動作確認し、接続に成功すれば準備完了
-
-この設定が完了すれば、次章でCGIからODBC経由でDBアクセスが可能になります。
-
-## A.6 CGIからのDB接続実装（ODBC経由）
-
-この節では、実際に C言語で書かれたCGIプログラムから MariaDB に ODBC経由で接続し、クエリを実行してHTMLを返すまでの最小構成を解説します。
-
----
-
-### A.6.1 必要なヘッダファイルとライブラリ
-
-ODBCを使うには、以下のヘッダとライブラリが必要です。
-
-```c
-#include <sql.h>
-#include <sqlext.h>
-```
-
-ビルド時には `-lodbc` オプションでリンクします：
-
-```bash
-gcc dbtest.c -o dbtest.cgi -lodbc
-```
-
----
-
-### A.6.2 接続＆クエリ実行の最小サンプル
-
-以下は、`testapp` データベースに接続し、`SELECT 1` を実行するだけの最小サンプルです。
-
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <sql.h>
-#include <sqlext.h>
-
-int main(void) {
-    SQLHENV henv;
-    SQLHDBC hdbc;
-    SQLHSTMT hstmt;
-    SQLRETURN ret;
-    SQLINTEGER result;
-
-    printf("Content-Type: text/html\n\n");
-    printf("<html><body><h1>ODBC接続テスト</h1>\n");
-
-    // 環境ハンドル
-    if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv) != SQL_SUCCESS) {
-        printf("<p>環境ハンドル作成失敗</p></body></html>");
-        return 1;
-    }
-    SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
-
-    // 接続ハンドル
-    SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
-
-    // DSNなし接続文字列
-    char *connStr = "Driver=MariaDB;Server=localhost;Database=testapp;User=webuser;Password=webpass;";
-    ret = SQLDriverConnect(hdbc, NULL, (SQLCHAR*)connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_NOPROMPT);
-
-    if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-        printf("<p>接続失敗</p></body></html>");
-        SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
-        SQLFreeHandle(SQL_HANDLE_ENV, henv);
-        return 1;
-    }
-
-    // ステートメントハンドル
-    SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-    ret = SQLExecDirect(hstmt, (SQLCHAR*)"SELECT 1", SQL_NTS);
-
-    if (ret == SQL_SUCCESS) {
-        SQLBindCol(hstmt, 1, SQL_C_SLONG, &result, 0, NULL);
-        if (SQLFetch(hstmt) == SQL_SUCCESS) {
-            printf("<p>SELECT結果: %d</p>\n", result);
-        }
-    } else {
-        printf("<p>クエリ実行失敗</p>\n");
-    }
-
-    // 解放
-    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-    SQLDisconnect(hdbc);
-    SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
-    SQLFreeHandle(SQL_HANDLE_ENV, henv);
-
-    printf("</body></html>\n");
-    return 0;
-}
-```
-
----
-
-### A.6.3 ビルドと配置手順
-
-```bash
-gcc dbtest.c -o dbtest.cgi -lodbc
-sudo mv dbtest.cgi /usr/lib/cgi-bin/
-sudo chmod 755 /usr/lib/cgi-bin/dbtest.cgi
-```
-
-その後、ブラウザで以下にアクセスします：
-
-```
-http://localhost/cgi-bin/dbtest.cgi
-```
-
----
-
-### A.6.4 トラブル対応
-
-| 症状 | 対応 |
-|------|------|
-| 500 Internal Server Error | CGIに実行権限がない、または出力フォーマット（Content-Type）ミス |
-| CGI出力が止まる | `connStr` の Driver 名・パスをチェック（MariaDBが登録済みか） |
-| クエリが失敗する | ユーザ名・パスワード・DB名のタイプミス |
-| Apacheログにエラーが出る | `sudo tail -f /var/log/apache2/error.log` で確認 |
-
----
-
-### 小まとめ
-
-- C言語CGIからODBC経由でMariaDBに接続
-- DSNなし接続文字列で再現性・移植性を重視
-- 最小の `SELECT 1` で構成し、HTMLを返す
-- トラブル時はApacheログと実行権限を重点的に確認
-
-次章 A.7 では、これを実運用に持っていくためのTipsや注意点を解説します。
-
-## A.7 デプロイ時の注意点とTips
-
-この節では、ローカルで動作確認を終えたCGIアプリケーションを本番サーバへデプロイする際の注意点や推奨設定について整理します。開発時には動作していたのに、サーバ上では動かない・挙動が異なるといったトラブルを未然に防ぐための基本事項を押さえます。
-
----
-
-### A.7.1 所有権と実行権限の設定
-
-CGIプログラムは、Apacheの実行ユーザ（通常 `www-data`）が読み取り・実行できる必要があります。
-
-```bash
-sudo chown root:www-data /usr/lib/cgi-bin/myapp.cgi
-sudo chmod 755 /usr/lib/cgi-bin/myapp.cgi
-```
-
-- `chmod 755`：全ユーザが実行可能なように設定
-- `chown root:www-data`：Apacheのグループに属するよう設定
-
----
-
-### A.7.2 Apache設定の確認（特に複数VirtualHost時）
-
-複数サイトやVPS環境では、`/usr/lib/cgi-bin` を利用する構成であっても、VirtualHost単位での `ScriptAlias` や `<Directory>` 設定が必要なことがあります。
-
-```apache
-<VirtualHost *:80>
-    ...
-    ScriptAlias /cgi-bin/ /usr/lib/cgi-bin/
-
-    <Directory "/usr/lib/cgi-bin">
-        Options +ExecCGI
-        SetHandler cgi-script
-        Require all granted
-    </Directory>
-</VirtualHost>
-```
-
----
-
-### A.7.3 ファイアウォールやポート制限
-
-本番環境では外部公開にあたってファイアウォールの設定が必要になる場合があります。
-
-```bash
-# UFWの例（ポート80/443開放）
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-```
-
-また、クラウド環境ではセキュリティグループやNAT設定も併せて確認しましょう。
-
----
-
-### A.7.4 SELinuxやAppArmorの制約
-
-CentOSや一部Ubuntuサーバでは、SELinux/AppArmorによってCGIの動作が制限されることがあります。アクセス拒否ログが `/var/log/audit/` や `dmesg` に出ていないか確認し、必要に応じてポリシーを緩和するか、無効化する必要があります。
-
----
-
-### A.7.5 バックアップとログ確認体制
-
-- `.cgi` や `.conf` ファイルの変更時にはバージョン管理（Gitなど）を活用
-- Apacheのログ確認：
-
-```bash
-sudo tail -f /var/log/apache2/error.log
-```
-
-- MariaDB側のログも `/var/log/mysql/error.log` に記録されている場合があります。
-
----
-
-### 小まとめ
-
-- 所有権と実行権限は `www-data` 実行を前提に整える
-- Apache設定はVirtualHost単位でも確認
-- 本番環境ではファイアウォール／セキュリティ機構に注意
-- ログ出力とトラブルシュート体制を事前に整備
-
-以上を踏まえることで、本番環境でも安定してCGIアプリを運用できるようになります。
-
-## A.8 補足情報集（UserDir構成・DSNあり接続・その他）
-
-この節では、教材本編では省略した構成のバリエーションや、現場でよくあるトラブル・TIPSなどを補足的に紹介します。環境に応じた応用や再現、トラブル対応の際の参考にしてください。
-
----
-
-### A.8.1 UserDir構成（ユーザー単位のCGI配置）
-
-Apacheには `mod_userdir` を有効化することで、各ユーザーのホームディレクトリ以下でWebサイトを公開できます。
-
-#### 例：`/home/username/public_html/cgi-bin/`
+ユーザディレクトリでの公開には `mod_userdir` を有効化します。
 
 ```bash
 sudo a2enmod userdir
 sudo systemctl restart apache2
 ```
 
-`/etc/apache2/mods-enabled/userdir.conf` にて以下のように設定：
+設定ファイル：`/etc/apache2/mods-enabled/userdir.conf`
 
 ```apache
 <Directory /home/*/public_html/cgi-bin>
@@ -666,62 +138,421 @@ sudo systemctl restart apache2
 </Directory>
 ```
 
-ブラウザアクセス例：
-
-```
-http://localhost/~username/cgi-bin/hello.cgi
-```
+アクセス例：`http://localhost/~username/cgi-bin/hello.cgi`
 
 ---
 
-### A.8.2 DSNあり接続を使いたい場合
+## A.3 JSON APIに関する設定（第10章対応）
 
-Appendix A.5でDSNなし接続を推奨しましたが、以下のような理由でDSNありを選ぶケースもあります。
+### A.3.1 CGI拡張子の拡張
 
-- 接続先を頻繁に切り替える必要がある
-- 複数のツールで一貫した設定を使いたい
+`.cgi` 以外にも `.api` や `.json.cgi` を使用したい場合：
 
-その場合は `/etc/odbc.ini` や `~/.odbc.ini` に設定し、`SQLConnect()` でDSN名を渡して使用します。
+```apache
+AddHandler cgi-script .cgi .api
+```
 
-#### DSN名を使う接続例：
+または：
+
+```apache
+<Directory "/var/www/html/api">
+    Options +ExecCGI
+    AddHandler cgi-script .api
+</Directory>
+```
+
+### A.3.2 MIMEタイプの追加（静的JSONファイル対応）
+
+```apache
+AddType application/json .json
+```
+
+CGIが出力する `Content-Type` は明示的にプログラム内で指定する必要があります：
 
 ```c
-SQLConnect(hdbc, (SQLCHAR*)"mydsn", SQL_NTS, (SQLCHAR*)"user", SQL_NTS, (SQLCHAR*)"pass", SQL_NTS);
+printf("Content-Type: application/json; charset=UTF-8\n\n");
+```
+
+### A.3.3 クライアント確認用：curl例
+
+```bash
+curl -i "http://localhost/cgi-bin/list_diary.api?after_id=10"
+```
+
+必要に応じてヘッダを指定：
+
+```bash
+curl -H "Accept: application/json" ...
 ```
 
 ---
 
-### A.8.3 実行権限・shebang・改行コードの罠
+## A.4 ODBCの構成方針とDSN
 
-Windows上で開発したCGIスクリプトをLinuxへ転送する際、以下に注意：
+本書では DSNなし構成（接続文字列埋め込み）を推奨します：
 
-- 改行コード（CRLF）があると `500 Internal Server Error` の原因になる
-- shebang（`#!/usr/bin/env`）が `bash` や `sh` ではなく `csh` などになると予期せぬ挙動に
+```c
+SQLCHAR connStr[] = "DRIVER={MariaDB};SERVER=localhost;DATABASE=testdb;UID=user;PWD=pass;";
+```
 
-#### 対応策：
+### DSNあり接続を使用する場合
+
+`/etc/odbc.ini` または `~/.odbc.ini` にて定義：
+
+```ini
+[mydsn]
+Driver = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+Server = localhost
+Database = testdb
+User = user
+Password = pass
+```
+
+接続コード：
+
+```c
+SQLConnect(hdbc, (SQLCHAR*)"mydsn", SQL_NTS, ...);
+```
+
+---
+
+## A.5 CGI開発時の罠とTips
+
+### 改行コード問題（Windows→Linux）
 
 ```bash
-# 改行コードを修正（dos2unixインストール済みの場合）
 dos2unix hello.cgi
 ```
 
+### 実行権限の付与
+
+```bash
+chmod +x hello.cgi
+```
+
+### shebang の確認
+
+```bash
+#!/usr/bin/env bash
+```
+
+csh や zsh になっていないか注意。
+
 ---
 
-### A.8.4 本書の構成をローカルで再現したい場合のヒント
+## A.6 再現性ある構成のために
 
-- Apacheの設定ファイルや `.cgi` ファイルはGit等で管理することで、再現性が高まります
-- `isql` や `odbcinst -q -d` などのコマンドをスクリプト化しておくと初期構築がスムーズ
-- 教材で使ったディレクトリ構成やサンプルCGIを `/opt/c-cgi-book/` 等にまとめておくと複数環境で流用可能
+- サンプルコードやApache設定をGit管理する
+- DSN定義やisqlスクリプトを初期化スクリプトにまとめる
+- `/opt/c-cgi-book/` など専用ディレクトリを作成し教材構成を保存
 
 ---
 
-### 小まとめ
+## 小まとめ
 
-この章では以下の補足情報を扱いました：
+- Apache側の `AddHandler` や `.htaccess` によって柔軟なAPI設計が可能
+- CGIは `Content-Type` を明示出力すること（Apacheは中継するだけ）
+- JSON APIのcurlテストやデバッグ手法も把握しておくと開発効率が上がる
+- DSNなし／ありの使い分け、UserDir構成など発展的構成も紹介
 
-- UserDirを使った構成の有効化と利用法
-- DSNあり接続の用途と設定例
-- 改行・shebang・パーミッションの罠と対処
-- 再現性のあるローカル構成維持の工夫
+以上をもとに、本書の各章を補完し、ローカルおよび本番へのデプロイを支援するAppendixとします。
 
-本書の範囲外でも、これらのTipsが応用・発展の一助になることを願っています。
+## A.1 mod_cgi の有効化（第2章対応）
+
+Apache で C 言語の CGI プログラムを実行するには、`mod_cgi`（または `mod_cgid`）が有効になっている必要があります。
+
+### A.1.1 有効化手順（Debian / Ubuntu 系）
+
+```sh
+sudo a2enmod cgi
+sudo systemctl restart apache2
+```
+
+- モジュールの有効化後は、Apache の再起動が必要です。
+
+### A.1.2 設定ファイル例
+
+Apache のサイト設定ファイル（`/etc/apache2/sites-available/000-default.conf` など）に以下を追加：
+
+```apacheconf
+<Directory "/usr/lib/cgi-bin">
+    Options +ExecCGI
+    AddHandler cgi-script .cgi .pl .out
+</Directory>
+```
+
+> ※ 上記の `Directory` パスは、実際に CGI を配置するディレクトリに応じて調整してください。
+
+
+## A.2 CGIファイルの配置と実行権限（第3章対応）
+
+CGIファイルは Web サーバが実行できる場所に配置し、実行権限を付与する必要があります。
+
+### A.2.1 実行ディレクトリの例
+
+```sh
+/usr/lib/cgi-bin/
+```
+
+### A.2.2 実行権限の設定
+
+```sh
+chmod +x hello.cgi
+```
+
+- 所有者およびApacheプロセスが実行できるように設定します。
+
+> ※ SELinuxやAppArmorの設定によっては別途許可が必要な場合があります。
+
+
+## A.3 Content-Length トラブルとデバッグ（第4章対応）
+
+POSTメソッドでデータを受信する際、`Content-Length` が不正または未設定の場合に `fread()` が正常に動作しないことがあります。
+
+### A.3.1 デバッグ手法
+
+```sh
+hexdump -C postdata.txt
+```
+
+- 内容を16進で確認し、改行コードや余計な空白が入っていないか確認します。
+
+### A.3.2 テスト送信例（curl）
+
+```sh
+curl -X POST -d "name=Alice" http://localhost/cgi-bin/form.cgi
+```
+
+- POSTデータの送信確認や、Content-Length の自動付加を確認できます。
+
+
+## A.4 malloc / free の注意点とデバッグ（第5章対応）
+
+構造体や文字列を動的に確保する場合、`malloc()` や `strdup()` を使用しますが、解放忘れによるメモリリークに注意が必要です。
+
+### A.4.1 確保と解放の基本
+
+```c
+char *name = strdup("Alice");
+free(name);
+```
+
+### A.4.2 メモリリークの検出ツール
+
+```sh
+valgrind ./form_handler.cgi
+```
+
+- 解放漏れや未初期化のメモリ利用をチェックできます。
+
+
+## A.5 テンプレートファイルと文字コード（第6章対応）
+
+テンプレートファイルはUTF-8で保存し、改行コードの統一にも注意が必要です。
+
+### A.5.1 配置ディレクトリの例
+
+```sh
+/var/www/html/templates/
+```
+
+### A.5.2 文字コードの確認
+
+```sh
+file template.html
+nkf -g template.html
+```
+
+- UTF-8 であること、および BOM の有無を確認します。
+
+
+## A.6 unixODBC 設定と動作確認（第7章対応）
+
+ODBC 接続には `/etc/odbc.ini` と `/etc/odbcinst.ini` の2つの構成ファイルが必要です。
+
+### A.6.1 DSN 設定例（/etc/odbc.ini）
+
+```ini
+[mydb]
+Driver = MariaDB
+Server = localhost
+Database = sample
+User = user
+Password = pass
+```
+
+### A.6.2 ドライバ定義例（/etc/odbcinst.ini）
+
+```ini
+[MariaDB]
+Description = ODBC for MariaDB
+Driver = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+```
+
+### A.6.3 接続テスト
+
+```sh
+isql mydb user pass
+```
+
+
+## A.7 セッションディレクトリの運用（第8章対応）
+
+セッションファイルを `/tmp/sessions/` などに保存する場合、以下の点に注意します。
+
+### A.7.1 ディレクトリの作成と権限
+
+```sh
+sudo mkdir /tmp/sessions
+sudo chmod 733 /tmp/sessions
+```
+
+- Apache ユーザーが読み書き可能で、他のユーザーからはアクセスできないようにします。
+
+### A.7.2 自動削除対策
+
+一部の Linux では `/tmp` 以下のファイルが自動削除される場合があるため、定期的な確認が推奨されます。
+
+
+## A.8 簡易CMS用データベース構成（第9章対応）
+
+本書第9章「簡易CMS（日記投稿アプリ）」では、以下のテーブル構成を前提としています。
+
+### A.8.1 diaryテーブルの定義
+
+```sql
+CREATE TABLE diary (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    title VARCHAR(255),
+    body TEXT,
+    is_public TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### A.8.2 初期データの投入例
+
+```sql
+INSERT INTO diary (user_id, title, body, is_public)
+VALUES
+(1, '初めての日記', 'これはテスト投稿です。', 1),
+(1, '下書きメモ', 'これは非公開の投稿です。', 0);
+```
+
+
+## A.9 APIテストとContent-Type（第10章対応）
+
+JSON API をテストする際のツールや注意点をまとめます。
+
+### A.9.1 curl による GET / POST 送信
+
+```sh
+curl http://localhost/cgi-bin/api.cgi
+curl -X POST -H "Content-Type: application/json" -d '{"key":"value"}' http://localhost/cgi-bin/api.cgi
+```
+
+### A.9.2 Content-Type の確認
+
+レスポンスに `Content-Type: application/json` が含まれているか確認します。
+
+### A.9.3 整形ツール
+
+```sh
+curl http://localhost/cgi-bin/api.cgi | jq
+```
+
+- JSONが整形され、ブラウザよりも読みやすくなります。
+
+## A.10 日記投稿アプリのテンプレート対応例（第9章対応）
+
+本章では、第9章「簡易CMS（日記投稿アプリ）」で作成した投稿画面をテンプレート対応に改良した例を紹介します。
+
+> ※ 第8章をご覧の方へ：  
+> 本例は、セッション管理によってログイン済みユーザー名を表示する構成にも対応しており、第8章のテンプレート対応にも応用できます。
+
+### A.10.1 テンプレートファイル（template_diary_post.html）
+
+```html
+<html>
+<head><title>${title}</title></head>
+<body>
+<h1>${title}</h1>
+<p>ようこそ、${username}さん。</p>
+<form method="POST" action="/cgi-bin/diary_post.cgi">
+  <textarea name="body" rows="5" cols="40"></textarea><br>
+  <input type="submit" value="投稿">
+</form>
+</body>
+</html>
+```
+
+### A.10.2 diary_post.cgi（テンプレート対応版）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "template.h"
+#include "session.h"
+
+int main(void) {
+    session_t session;
+    session_start(&session);
+
+    char *template = load_template("template_diary_post.html");
+    replace(template, "${title}", "日記を書く");
+    replace(template, "${username}", session.username);
+
+    printf("Content-Type: text/html
+
+");
+    puts(template);
+
+    free(template);
+    session_free(&session);
+    return 0;
+}
+```
+
+### A.10.3 template.h の関数例（抜粋）
+
+```c
+char *load_template(const char *filename);
+void replace(char *template, const char *key, const char *value);
+```
+
+### A.10.4 効果と利点
+
+- HTML構造とロジックの分離により、保守性と再利用性が大幅に向上します。
+- テンプレートファイルを差し替えるだけで画面デザインを変更できます。
+
+## A.11 セッションセキュリティ補足（第9章対応）
+
+セッションの安全性を高めるための具体的な実装例を以下に示します。
+
+### A.11.1 セッションIDの生成（/dev/urandom利用）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+void sid_generate(char *sid, size_t len) {
+    FILE *fp = fopen("/dev/urandom", "rb");
+    fread(sid, 1, len, fp);
+    fclose(fp);
+    for (size_t i = 0; i < len; i++) {
+        sid[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[sid[i] % 36];
+    }
+    sid[len] = '\00';
+}
+```
+
+### A.11.2 Cookieの安全な出力
+
+```c
+printf("Set-Cookie: SID=%s; HttpOnly; Secure; SameSite=Strict
+", sid);
+```
+
+> ※ `Secure` 属性は HTTPS 通信でのみ有効です。本番環境ではHTTPSを利用してください。

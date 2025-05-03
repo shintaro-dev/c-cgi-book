@@ -51,6 +51,11 @@ CGIでは、WebサーバがHTTPリクエストを**標準入力や環境変数�
 
 ---
 
+> ※ Apacheの設定変更（`mod_cgi`の有効化や`.cgi`の実行許可）については、
+> 第11章「Appendix：開発環境・デプロイTips集で詳しく解説しています。
+
+---
+
 ## 近代的な技術との関係
 
 - PHP, Ruby on Rails, Java Servlet, FastCGI などは、CGIの**仕組みを内包・拡張・高速化**した存在
